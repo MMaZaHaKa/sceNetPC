@@ -1,0 +1,7 @@
+sdk/* linguist-vendored
+vendor/* linguist-vendored
+assets/**/*.img filter=lfs diff=lfs merge=lfs -text
+assets/**/*.RAW filter=lfs diff=lfs merge=lfs -text
+assets/**/*.adf filter=lfs diff=lfs merge=lfs -text
+assets/**/*.mp3 filter=lfs diff=lfs merge=lfs -text
+assets/**/*.VB filter=lfs diff=lfs merge=lfs -text
