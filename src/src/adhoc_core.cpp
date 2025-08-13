@@ -451,8 +451,70 @@ namespace adhoc_core {
     // Expose a few functions for adhoc_api.cpp to wrap (names chosen so adhoc_api can call them)
 } // namespace adhoc_core
 
+
 // C wrappers for use by adhoc_api (not the final sceNetAdhoc* names to avoid conflicting with earlier implementations).
 extern "C" {
+    // Формат структуры, который будет возвращаться в API (упрощённый, но совместимый с PPSSPP layout)
+#define ADHOCCTL_NICKNAME_LEN 32
+
+    struct SceNetAdhocctlPeerInfoEmu {
+        uint32_t next;                 // next pointer (emulated; filled with 0 or offset)
+        uint8_t mac_addr[6];           // mac
+        uint8_t pad[2];                // padding to align
+        uint32_t ip_addr;              // ip (network byte order)
+        uint32_t flags;
+        uint64_t last_recv;            // microseconds timestamp
+        char nickname[ADHOCCTL_NICKNAME_LEN];
+    };
+
+    // Добавить или обновить peer в списке (mac[6], ip_nbo, nickname может быть nullptr)
+    int NetAdhoc_AddFriend_Wrap(const uint8_t* mac, uint32_t ip_nbo, const char* nick) {
+        if (!mac) return -1;
+        SceNetEtherAddr macs;
+        memcpy(macs.data, mac, 6);
+        std::string sname = (nick) ? std::string(nick) : std::string();
+        // используем внутреннюю функцию addFriend_internal (определена в этом же файле в namespace adhoc_core)
+        adhoc_core::addFriend_internal(macs, ip_nbo, sname);
+        return 0;
+    }
+
+    // Скопировать список peers (up to maxEntries) в outBuf и вернуть количество скопированных элементов.
+    // outBuf должен указывать на массив SceNetAdhocctlPeerInfoEmu с capacity >= maxEntries.
+    int NetAdhoc_GetPeerList_Wrap(SceNetAdhocctlPeerInfoEmu* outBuf, int maxEntries) {
+        if (!outBuf || maxEntries <= 0) return 0;
+        std::lock_guard<std::recursive_mutex> guard(adhoc_core::peerlock);
+        int written = 0;
+        PeerInfo* p = adhoc_core::friends_head;
+        while (p && written < maxEntries) {
+            SceNetAdhocctlPeerInfoEmu& dst = outBuf[written];
+            memset(&dst, 0, sizeof(dst));
+            // No emulated "next" pointer since caller is in native process - leave 0.
+            memcpy(dst.mac_addr, p->mac_addr.data, 6);
+            dst.ip_addr = p->ip_addr;
+            dst.flags = 0x0400; // emulate some flags as PPSSPP often sets
+            dst.last_recv = p->last_recv_us;
+            // copy nickname (ensure null-terminated)
+            if (!p->nickname.empty()) {
+                strncpy(dst.nickname, p->nickname.c_str(), ADHOCCTL_NICKNAME_LEN - 1);
+                dst.nickname[ADHOCCTL_NICKNAME_LEN - 1] = '\0';
+            }
+            else {
+                dst.nickname[0] = '\0';
+            }
+            ++written;
+            p = p->next;
+        }
+        return written;
+    }
+
+    // Получить количество peers (удобно)
+    int NetAdhoc_GetPeerCount_Wrap() {
+        std::lock_guard<std::recursive_mutex> guard(adhoc_core::peerlock);
+        int cnt = 0;
+        PeerInfo* p = adhoc_core::friends_head;
+        while (p) { ++cnt; p = p->next; }
+        return cnt;
+    }
 
     // Create PDP socket wrapper
     int NetAdhocPdp_Create_Wrap(const char* mac, int port, int bufsz, uint32_t flag) {

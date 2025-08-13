@@ -379,6 +379,22 @@ int NetAdhocGetPtpStat(int id, void* statBuf, int statBufSize) {
     return -1;
 }
 
+// Set peer (attach dest MAC -> ip, port to existing ptp slot)
+int NetAdhocPtp_SetPeer(int id, const SceNetEtherAddr* destMac, uint16_t port) {
+    if (!destMac) return -1;
+    int idx = id - 1;
+    if (idx < 0 || idx >= MAX_PTP) return -1;
+    std::lock_guard<std::mutex> lk(g_ptp_lock);
+    if (!g_ptp_slots[idx].used) return -2;
+    // Use simple heuristic: first 4 bytes of MAC-like buffer -> ipv4 in network byte order
+    uint32_t ip_nbo;
+    memcpy(&ip_nbo, destMac->data, 4);
+    g_ptp_slots[idx].peer_ip_nbo = ip_nbo;
+    g_ptp_slots[idx].peer_port = port;
+    return 0;
+}
+
+
 // C wrappers
 extern "C" {
 
@@ -395,5 +411,8 @@ extern "C" {
     int NetAdhocPtp_Recv_Wrap(int id, void* buf, int* len, int timeout_us, int flag) { return NetAdhocPtp_Recv(id, buf, len, timeout_us, flag); }
     int NetAdhocPtp_Flush_Wrap(int id, int timeout_ms, int flag) { return NetAdhocPtp_Flush(id, timeout_ms, flag); }
     int NetAdhocGetPtpStat_Wrap(int id, void* statBuf, int statBufSize) { return NetAdhocGetPtpStat(id, statBuf, statBufSize); }
+    int NetAdhocPtp_SetPeer_Wrap(int id, const void* destMac, uint16_t port) {
+        return NetAdhocPtp_SetPeer(id, reinterpret_cast<const SceNetEtherAddr*>(destMac), port);
+    }
 
 } // extern "C"

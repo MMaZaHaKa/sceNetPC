@@ -13,21 +13,22 @@
 #define ADHOCPP_API
 #endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
     // Init / Term
     ADHOCPP_API int sceNetAdhocInit();
     ADHOCPP_API int sceNetAdhocTerm();
 
     // PDP (Peer Data Protocol) - basic operations
-    // socketId returned >0 on success (PSP-style), <=0 error codes
     ADHOCPP_API int sceNetAdhocPdpCreate(const uint8_t mac[6], int port, int bufferSize, uint32_t flag);
     ADHOCPP_API int sceNetAdhocPdpDelete(int socketId);
     ADHOCPP_API int sceNetAdhocPdpSend(int socketId, const uint8_t destMac[6], uint16_t port, const void* data, int* len, uint32_t flag);
     ADHOCPP_API int sceNetAdhocPdpRecv(int socketId, void* buf, int* len, int timeout_us, uint32_t flag);
     ADHOCPP_API int sceNetAdhocGetPdpStat(int socketId, void* statBuf, int statBufSize);
 
-    // PTP (Peer-to-peer Transport) - prototypes (stubs for now)
+    // PTP (Peer-to-peer Transport) - prototypes
     ADHOCPP_API int sceNetAdhocPtpOpen(const char* name, int mode, int flags);
     ADHOCPP_API int sceNetAdhocPtpClose(int ptpId);
     ADHOCPP_API int sceNetAdhocPtpSend(int ptpId, const void* data, int len, int* sent, int flags);
@@ -35,13 +36,19 @@ extern "C" {
     ADHOCPP_API int sceNetAdhocPtpConnect(int ptpId, const uint8_t destMac[6], uint16_t port, int timeout_ms);
     ADHOCPP_API int sceNetAdhocPtpListen(int ptpId, int backlog);
     ADHOCPP_API int sceNetAdhocPtpAccept(int ptpId, uint8_t outMac[6], uint16_t* outPort);
+    ADHOCPP_API int sceNetAdhocPtpFlush(int ptpId, int timeout_ms, int flags);
+    ADHOCPP_API int sceNetAdhocGetPtpStat(int ptpId, void* statBuf, int statBufSize);
 
-    // AdhocCtl / Matching / Discover (prototypes — to implement)
-    ADHOCPP_API int sceNetAdhocctlInit();
+    // AdhocCtl - updated signatures to match implementation
+    // NOTE: sceNetAdhocctlInit takes PSP-style thread parameters in PPSSPP; we expose them so implementation can use them.
+    ADHOCPP_API int sceNetAdhocctlInit(int stackSize, int prio, uint32_t productAddr);
     ADHOCPP_API int sceNetAdhocctlTerm();
-    ADHOCPP_API int sceNetAdhocctlConnect();
+    ADHOCPP_API int sceNetAdhocctlConnect(const char* groupName);
     ADHOCPP_API int sceNetAdhocctlDisconnect();
+    ADHOCPP_API int sceNetAdhocctlGetState(uint32_t ptrToStatus); // ptrToStatus is ignored in our impl
+    ADHOCPP_API int sceNetAdhocctlGetPeerList(void* outBuf, int maxEntries);
 
+    // Matching / Discover - prototypes (to be implemented)
     ADHOCPP_API int sceNetAdhocMatchingCreate();
     ADHOCPP_API int sceNetAdhocMatchingTerm();
     ADHOCPP_API int sceNetAdhocMatchingAdd(int matchingId, const void* params);
@@ -53,4 +60,6 @@ extern "C" {
     // Utility
     ADHOCPP_API const char* adhoc_version();
 
-} // extern "C"
+#ifdef __cplusplus
+}
+#endif
