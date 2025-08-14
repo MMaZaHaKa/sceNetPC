@@ -45,16 +45,17 @@ static void pack_ip_to_mac(uint32_t ip_nbo, uint8_t dest[6]) {
     dest[4] = 0; dest[5] = 0;
 }
 
-// Local structure matching earlier SceNetAdhocctlPeerInfoEmu in adhoc_core
-struct PeerInfoEmuLocal {
-    uint32_t next;
-    uint8_t mac[6];
-    uint8_t pad[2];
-    uint32_t ip_addr;
-    uint32_t flags;
-    uint64_t last_recv;
-    char nickname[32];
-};
+// in ppsspp_adhoc.h
+//// Local structure matching earlier SceNetAdhocctlPeerInfoEmu in adhoc_core
+//struct PeerInfoEmuLocal {
+//    uint32_t next;
+//    uint8_t mac[6];
+//    uint8_t pad[2];
+//    uint32_t ip_addr;
+//    uint32_t flags;
+//    uint64_t last_recv;
+//    char nickname[32];
+//};
 
 // Send a discover ping to given ip_nbo / port
 static void discover_send_ping(int pdp_socket, uint32_t ip_nbo, uint16_t port, const char* mynick) {
@@ -111,7 +112,7 @@ static void discover_thread_func() {
             discover_send_ping(g_discover_pdp_socket, loop_ip, DISCOVER_PORT, mynick);
         }
         else {
-            const int MAX_PEERS = 64;
+            //const int MAX_PEERS = 64;
             PeerInfoEmuLocal peers[MAX_PEERS];
             int got = NetAdhoc_GetPeerList_Wrap(peers, MAX_PEERS);
             for (int i = 0; i < got; ++i) {

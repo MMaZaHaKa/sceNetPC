@@ -13,6 +13,19 @@
 #define ADHOCPP_API
 #endif
 
+//#define MAX_PEERS 16
+#define MAX_PEERS 64
+
+struct PeerInfoEmuLocal {
+    uint32_t next;
+    uint8_t mac[6];
+    uint8_t pad[2];
+    uint32_t ip_addr;
+    uint32_t flags;
+    uint64_t last_recv;
+    char nickname[32];
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif

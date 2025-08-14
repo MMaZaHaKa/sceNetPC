@@ -314,17 +314,18 @@ extern "C" {
         if (params == nullptr) {
             // if no params, add all peers from global peerlist into matching slot (up to capacity)
             // Use NetAdhoc_GetPeerList_Wrap to fetch peers
-            const int MAX_PEERS = 64;
+            //const int _MAX_PEERS = 64;
             // temporary buffer uses the same layout used earlier (SceNetAdhocctlPeerInfoEmu)
-            struct PeerInfoEmuLocal {
-                uint32_t next;
-                uint8_t mac[6];
-                uint8_t pad[2];
-                uint32_t ip_addr;
-                uint32_t flags;
-                uint64_t last_recv;
-                char nickname[32];
-            } peers[MAX_PEERS];
+            //struct PeerInfoEmuLocal {
+            //    uint32_t next;
+            //    uint8_t mac[6];
+            //    uint8_t pad[2];
+            //    uint32_t ip_addr;
+            //    uint32_t flags;
+            //    uint64_t last_recv;
+            //    char nickname[32];
+            //} peers[_MAX_PEERS];
+            PeerInfoEmuLocal peers[MAX_PEERS];
             int got = NetAdhoc_GetPeerList_Wrap(peers, MAX_PEERS);
             int added = 0;
             for (int i = 0; i < got && (int)slot.members.size() < MAX_MEMBERS_PER_MATCH; ++i) {
