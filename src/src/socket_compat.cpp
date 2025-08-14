@@ -84,6 +84,75 @@ int recv_udp_with_timeout(native_socket_t fd, void* buf, int maxlen, int timeout
     return recvd;
 }
 
+//int recv_udp_from(native_socket_t fd, void* buf, int maxlen, int timeout_us, uint32_t* out_ip_nbo, uint16_t* out_port) {
+//    if (fd == (native_socket_t)-1) return -1;
+//    fd_set readfds;
+//    FD_ZERO(&readfds);
+//    FD_SET(fd, &readfds);
+//    struct timeval tv;
+//    tv.tv_sec = timeout_us / 1000000;
+//    tv.tv_usec = timeout_us % 1000000;
+//
+//    int nfds = (int)(fd + 1);
+//    int sel = select(nfds, &readfds, nullptr, nullptr, (timeout_us >= 0) ? &tv : nullptr);
+//    if (sel <= 0) return -1; // timeout or error
+//
+//    struct sockaddr_in src;
+//    socklen_t slen = sizeof(src);
+//    int recvd = recvfrom(fd, (char*)buf, maxlen, 0, (struct sockaddr*)&src, &slen);
+//    if (recvd < 0) return -1;
+//    if (out_ip_nbo) *out_ip_nbo = src.sin_addr.s_addr;
+//    if (out_port) *out_port = ntohs(src.sin_port);
+//    return recvd;
+//}
+
+// new: recv_udp_from
+int recv_udp_from(native_socket_t fd, void* buf, int maxlen, int timeout_us, uint32_t* out_ip_nbo, uint16_t* out_port) {
+    if (fd == (native_socket_t)-1) return -1;
+    if (!buf || maxlen <= 0) return -1;
+
+#ifdef _WIN32
+    // On Windows, native_socket_t likely is SOCKET
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(fd, &readfds);
+    struct timeval tv;
+    tv.tv_sec = timeout_us / 1000000;
+    tv.tv_usec = timeout_us % 1000000;
+
+    int sel = select((int)fd + 1, &readfds, NULL, NULL, (timeout_us >= 0) ? &tv : NULL);
+    if (sel <= 0) return -1;
+
+    struct sockaddr_in src;
+    int slen = sizeof(src);
+    int recvd = recvfrom(fd, (char*)buf, maxlen, 0, (struct sockaddr*)&src, &slen);
+    if (recvd <= 0) return -1;
+    if (out_ip_nbo) *out_ip_nbo = src.sin_addr.s_addr;
+    if (out_port) *out_port = ntohs(src.sin_port);
+    return recvd;
+#else
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(fd, &readfds);
+    struct timeval tv;
+    tv.tv_sec = timeout_us / 1000000;
+    tv.tv_usec = timeout_us % 1000000;
+
+    int nfds = fd + 1;
+    struct timeval* tvp = (timeout_us >= 0) ? &tv : NULL;
+    int sel = select(nfds, &readfds, NULL, NULL, tvp);
+    if (sel <= 0) return -1;
+
+    struct sockaddr_in src;
+    socklen_t slen = sizeof(src);
+    int recvd = recvfrom(fd, (char*)buf, (size_t)maxlen, 0, (struct sockaddr*)&src, &slen);
+    if (recvd <= 0) return -1;
+    if (out_ip_nbo) *out_ip_nbo = src.sin_addr.s_addr;
+    if (out_port) *out_port = ntohs(src.sin_port);
+    return recvd;
+#endif
+}
+
 void closesocket_native(native_socket_t fd) {
 #ifdef _WIN32
     closesocket(fd);

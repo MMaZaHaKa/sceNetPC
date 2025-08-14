@@ -31,6 +31,7 @@ extern "C" {
     int NetAdhocPdp_Delete_Wrap(int socketId);
     int NetAdhocPdp_Send_Wrap(int socketId, const char* destMac, uint16_t port, const void* data, int* len, uint32_t flag);
     int NetAdhocPdp_Recv_Wrap(int socketId, void* buf, int* len, int timeout_us);
+    int NetAdhocPdp_RecvFrom_Wrap(int socketId, void* buf, int* len, int timeout_us, uint8_t outMac[6], uint16_t* outPort, uint32_t* outIp);
 }
 
 using namespace std::chrono_literals;
@@ -197,9 +198,24 @@ static void matching_worker_func(MatchingSlot* slot) {
             // try recv with small timeout (100 ms)
             char buf[2048];
             int buflen = sizeof(buf);
-            int r = NetAdhocPdp_Recv_Wrap(slot->pdp_socket_id, buf, &buflen, 100000); // 100ms
+            //int r = NetAdhocPdp_Recv_Wrap(slot->pdp_socket_id, buf, &buflen, 100000); // 100ms
+            uint8_t srcmac[6];
+            uint16_t srcport = 0;
+            uint32_t srcip = 0;
+            int r = NetAdhocPdp_RecvFrom_Wrap(slot->pdp_socket_id, buf, &buflen, 100000, srcmac, &srcport, &srcip);
             if (r > 0) {
                 buf[buflen] = '\0';
+                // update matching member by ip/mac
+                {
+                    std::lock_guard<std::mutex> lk(slot->lock);
+                    for (auto& m : slot->members) {
+                        if (m.ip_nbo == srcip || memcmp(m.mac, srcmac, 6) == 0) {
+                            m.last_seen_us = now_us();
+                            break;
+                        }
+                    }
+                }
+
                 // crude parsing: if message starts with "MATCH_HELLO:" extract nick and update member table
                 const char* prefix = "MATCH_HELLO:";
                 if (strncmp(buf, prefix, strlen(prefix)) == 0) {

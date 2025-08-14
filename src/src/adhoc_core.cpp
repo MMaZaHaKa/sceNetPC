@@ -28,6 +28,7 @@
 #include <vector>
 #include <algorithm>
 #include <cstdio>
+//#include <random>
 
 // --------------
 // Type visible to C wrappers: make global (NOT inside namespace)
@@ -448,6 +449,66 @@ namespace adhoc_core {
         }
     }
 
+    // Extended PDP recv from inside namespace adhoc_core
+// Returns bytes read (>0) or negative on error.
+    int NetAdhocPdp_RecvFrom_Internal(int socketId, void* buf, int* len_ptr, int timeout_us,
+        uint8_t outMac[6], uint16_t* outPort, uint32_t* outIp) {
+        if (!len_ptr || *len_ptr <= 0) return -1;
+        int idx = socketId - 1;
+        if (idx < 0 || idx >= MAX_PDP_SOCKETS) return -1;
+
+        std::lock_guard<std::mutex> lk(pdp_lock);
+        if (!pdp_slots[idx].used) return -2;
+        native_socket_t fd = pdp_slots[idx].fd;
+        if (fd == (native_socket_t)-1) return -3;
+
+        uint32_t src_ip_nbo = 0;
+        uint16_t src_port = 0;
+        int recvd = recv_udp_from(fd, buf, *len_ptr, timeout_us, &src_ip_nbo, &src_port);
+        if (recvd <= 0) return -4;
+
+        // Fill outputs
+        if (outIp) *outIp = src_ip_nbo;
+        if (outPort) *outPort = src_port;
+        if (outMac) {
+            // Encode IP into mac first 4 bytes, last two zeros (existing convention)
+            memcpy(outMac, &src_ip_nbo, 4);
+            outMac[4] = 0; outMac[5] = 0;
+        }
+
+        // Update peer table: if there's a known peer by IP or MAC, update last_recv_us.
+        {
+            std::lock_guard<std::recursive_mutex> pg(peerlock);
+            PeerInfo* p = friends_head;
+            bool found = false;
+            while (p) {
+                if (p->ip_addr == src_ip_nbo) {
+                    p->last_recv_us = ks_time_ms() * 1000;
+                    found = true;
+                    break;
+                }
+                // also try MAC match (if stored)
+                if (memcmp(p->mac_addr.data, outMac, 6) == 0) {
+                    p->last_recv_us = ks_time_ms() * 1000;
+                    found = true;
+                    break;
+                }
+                p = p->next;
+            }
+            if (!found) {
+                // Add peer with empty nickname (so it appears in peer list)
+                SceNetEtherAddr macs;
+                memcpy(macs.data, outMac, 6);
+                // use addFriend_internal to create entry
+                addFriend_internal(macs, src_ip_nbo, std::string());
+            }
+        }
+
+        *len_ptr = recvd;
+        return recvd;
+    }
+
+
     // Expose a few functions for adhoc_api.cpp to wrap (names chosen so adhoc_api can call them)
 } // namespace adhoc_core
 
@@ -532,6 +593,171 @@ extern "C" {
         SceNetEtherAddr dummyMac;
         uint16_t dummyPort = 0;
         return adhoc_core::NetAdhocPdp_Recv(socketId, buf, len, timeout_us, &dummyMac, &dummyPort);
+    }
+
+//    // Fill outMac[6] with a best-effort local MAC (returns 0 on success).
+//    // This derives a locally-administered MAC from the local IP (stable, deterministic).
+//    int NetAdhoc_GetLocalMac_Wrap(uint8_t outMac[6]) {
+//        if (!outMac) return -1;
+//        // Determine local IP by opening a UDP socket and connecting to a public address.
+//#ifdef _WIN32
+//        SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+//        if (s == INVALID_SOCKET) {
+//            return -2;
+//        }
+//#else
+//        int s = socket(AF_INET, SOCK_DGRAM, 0);
+//        if (s < 0) return -2;
+//#endif
+//
+//        struct sockaddr_in remote;
+//        memset(&remote, 0, sizeof(remote));
+//        remote.sin_family = AF_INET;
+//        remote.sin_port = htons(53); // DNS port
+//        // Use 8.8.8.8 (Google) — no packets actually sent by connect() for UDP
+//        inet_pton(AF_INET, "8.8.8.8", &remote.sin_addr);
+//
+//        int rc = connect(s, (struct sockaddr*)&remote, sizeof(remote));
+//        (void)rc;
+//        struct sockaddr_in local;
+//        socklen_t llen = sizeof(local);
+//        memset(&local, 0, sizeof(local));
+//        if (getsockname(s, (struct sockaddr*)&local, &llen) != 0) {
+//#ifdef _WIN32
+//            closesocket(s);
+//#else
+//            close(s);
+//#endif
+//            return -3;
+//        }
+//#ifdef _WIN32
+//        closesocket(s);
+//#else
+//        close(s);
+//#endif
+//
+//        uint32_t ip_nbo = local.sin_addr.s_addr; // network byte order
+//        uint8_t* ipbytes = (uint8_t*)&ip_nbo; // points to bytes in network order (big-endian on little hosts careful)
+//        // ip_nbo is in network order (big-endian). To derive more varied MAC, convert to host order bytes:
+//        uint32_t ip_host = ntohl(ip_nbo);
+//        uint8_t b0 = 0x02; // locally administered, unicast
+//        uint8_t b1 = (ip_host >> 24) & 0xFF;
+//        uint8_t b2 = (ip_host >> 16) & 0xFF;
+//        uint8_t b3 = (ip_host >> 8) & 0xFF;
+//        uint8_t b4 = (ip_host) & 0xFF;
+//        // last octet random but stable-per-run: use random_device seeded mt19937
+//        static thread_local std::mt19937_64 rng((std::random_device())());
+//        std::uniform_int_distribution<int> dist(0, 255);
+//        uint8_t b5 = (uint8_t)(dist(rng));
+//
+//        outMac[0] = b0;
+//        outMac[1] = b1;
+//        outMac[2] = b2;
+//        outMac[3] = b3;
+//        outMac[4] = b4;
+//        outMac[5] = b5;
+//        return 0;
+//    }
+//
+//    // Convert mac (6 bytes) to textual "aa:bb:cc:dd:ee:ff" into outStr (outLen bytes).
+//    // Returns 0 on success, negative on error.
+//    int NetAdhoc_MacToStr_Wrap(const uint8_t mac[6], char* outStr, int outLen) {
+//        if (!mac || !outStr || outLen <= 0) return -1;
+//        int needed = 18; // "aa:bb:cc:dd:ee:ff" + null -> 18 chars including '\0'
+//        if (outLen < needed) {
+//            // still try to write safe truncated string
+//            int r = snprintf(outStr, outLen, "%02x:%02x:%02x:%02x:%02x:%02x",
+//                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+//            if (r < 0) outStr[0] = '\0';
+//            return -2;
+//        }
+//        snprintf(outStr, outLen, "%02x:%02x:%02x:%02x:%02x:%02x",
+//            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+//        return 0;
+//    }
+
+    // Fill outMac[6] with local MAC (best-effort). Returns 0 on success, <0 on error.
+    int NetAdhoc_GetLocalMac_Wrap(uint8_t outMac[6]) {
+        if (!outMac) return -1;
+        // getLocalMac is defined earlier in this translation unit (inside adhoc_core namespace)
+        // we can call it directly since we are in same file.
+        SceNetEtherAddr mac;
+        adhoc_core::getLocalMac(&mac);
+        memcpy(outMac, mac.data, 6);
+        return 0;
+    }
+
+    // Convert MAC to human-readable string. outStr must be large enough (recommended >= 18).
+    int NetAdhoc_MacToStr_Wrap(const uint8_t mac[6], char* outStr, int outLen) {
+        if (!mac || !outStr || outLen <= 0) return -1;
+        // Format like "aa:bb:cc:dd:ee:ff"
+        int r = snprintf(outStr, outLen, "%02x:%02x:%02x:%02x:%02x:%02x",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        if (r < 0 || r >= outLen) {
+            // truncated or error
+            if (outLen > 0) outStr[outLen - 1] = '\0';
+            return -2;
+        }
+        return 0;
+    }
+
+    //// Extended PDP recv: returns payload + source info
+    //int NetAdhocPdp_RecvFrom_Wrap(int socketId, void* buf, int* len, int timeout_us,
+    //    uint8_t outMac[6], uint16_t* outPort, uint32_t* outIp) {
+    //    if (!len || *len <= 0) return -1;
+    //    int idx = socketId - 1;
+    //    // Validate index and access your pdp slots array. Example: g_pdp_slots[]
+    //    // Adjust the array name to match your adhoc_core implementation.
+    //    extern PdpSlot g_pdp_slots[]; // if your file already has g_pdp_slots; else adjust
+    //    extern int g_pdp_slots_count; // if available; else ignore validation
+
+    //    // Basic bounds check - if you don't have count, just check idx >= 0 and idx < MAX_PDP
+    //    if (idx < 0 /*|| idx >= MAX_PDP*/) return -1;
+
+    //    native_socket_t fd = g_pdp_slots[idx].fd;
+    //    if (fd == (native_socket_t)-1) return -1;
+
+    //    uint32_t src_ip_nbo = 0;
+    //    uint16_t src_port = 0;
+    //    int recvd = recv_udp_from(fd, buf, *len, timeout_us, &src_ip_nbo, &src_port);
+    //    if (recvd <= 0) return -1;
+
+    //    // fill outputs
+    //    if (outIp) *outIp = src_ip_nbo;
+    //    if (outPort) *outPort = src_port;
+    //    if (outMac) {
+    //        // encode ip into mac: first 4 bytes = ip_nbo, last two zeros
+    //        memcpy(outMac, &src_ip_nbo, 4);
+    //        outMac[4] = 0; outMac[5] = 0;
+    //    }
+
+    //    // Update peer table: find PeerInfo by MAC or IP and update last_recv_us
+    //    {
+    //        std::lock_guard<std::recursive_mutex> guard(peerlock); // peerlock exists in adhoc_core
+    //        PeerInfo* p = friends_head;
+    //        while (p) {
+    //            if (p->ip_addr == src_ip_nbo || (memcmp(p->mac_addr.data, outMac, 6) == 0)) {
+    //                p->last_recv_us = ks_time_ms() * 1000;
+    //                break;
+    //            }
+    //            p = p->next;
+    //        }
+    //        // If not found, optionally add to peerlist with empty nickname
+    //        if (!p) {
+    //            SceNetEtherAddr macs;
+    //            memcpy(macs.data, outMac, 6);
+    //            addFriend_internal(macs, src_ip_nbo, std::string()); // uses existing internal addFriend
+    //        }
+    //    }
+
+    //    *len = recvd;
+    //    return recvd;
+    //}
+
+    // Extended PDP recv wrapper for C callers
+    int NetAdhocPdp_RecvFrom_Wrap(int socketId, void* buf, int* len, int timeout_us,
+        uint8_t outMac[6], uint16_t* outPort, uint32_t* outIp) {
+        return adhoc_core::NetAdhocPdp_RecvFrom_Internal(socketId, buf, len, timeout_us, outMac, outPort, outIp);
     }
 
 } // extern "C"

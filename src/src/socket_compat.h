@@ -40,6 +40,11 @@ extern "C" {
 	int socket_shutdown_recv(native_socket_t s);
 	int socket_close(native_socket_t s);
 
+	// New: recv UDP and return remote address
+	// timeout_us similar to recv_udp_with_timeout
+	int recv_udp_from(native_socket_t fd, void* buf, int maxlen, int timeout_us, uint32_t* out_ip_nbo, uint16_t* out_port);
+
+
 	// socket error helper
 	int socket_errno();
 
