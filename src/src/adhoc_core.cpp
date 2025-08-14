@@ -306,6 +306,20 @@ namespace adhoc_core {
         native_socket_t fd = socket_udp_open_and_bind(bindPort);
         if (fd == (native_socket_t)-1) return -3;
 
+        // enable broadcast on the socket so discover can send to 255.255.255.255
+#ifdef _WIN32
+        char optval = 1;
+        int resopt = setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &optval, sizeof(optval));
+#else
+        int optval = 1;
+        int resopt = setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &optval, sizeof(optval));
+#endif
+        if (resopt != 0) {
+            LOG("[adhoc_core] warning: setsockopt(SO_BROADCAST) failed");
+            // continue anyway — not fatal
+        }
+
+
         // Set buffer size? (left as TODO)
 
         pdp_slots[slot].fd = fd;

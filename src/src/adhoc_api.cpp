@@ -114,6 +114,7 @@ extern "C" {
     ADHOCPP_API int sceNetAdhocPdpRecv(int socketId, void* buf, int* len, int timeout_us, uint32_t flag) {
         (void)flag;
         if (!g_inited) return -1;
+        // fallback to existing wrap (which returns bytes in *len)
         return NetAdhocPdp_Recv_Wrap(socketId, buf, len, timeout_us);
     }
     ADHOCPP_API int sceNetAdhocGetPdpStat(int socketId, void* statBuf, int statBufSize) {

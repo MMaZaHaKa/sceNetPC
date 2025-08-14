@@ -398,5 +398,144 @@ extern "C" {
         return 0;
     }
 
+#if 0
+    // Delete single matching slot (stop worker, free resources)
+    // Returns 0 on success, negative on error.
+    ADHOCPP_API int sceNetAdhocMatchingDelete(int matchingId) {
+        if (!g_matching_inited.load()) return -1;
+        int idx = matchingId - 1;
+        if (idx < 0 || idx >= MAX_MATCHING) return -1;
+        MatchingSlot& slot = g_matching_slots[idx];
+        if (!slot.used) return -2;
+
+        // Stop worker (if running)
+        if (slot.running) {
+            slot.running = false;
+            if (slot.worker.joinable()) {
+                slot.worker.join();
+            }
+        }
+
+        // Clean PDP socket if present
+        if (slot.pdp_socket_id > 0) {
+            NetAdhocPdp_Delete_Wrap(slot.pdp_socket_id);
+            slot.pdp_socket_id = -1;
+        }
+
+        // Clear members and metadata
+        {
+            std::lock_guard<std::mutex> lk(slot.lock);
+            slot.members.clear();
+            slot.match_flags = 0;
+            slot.match_name[0] = '\0';
+        }
+
+        slot.used = false;
+        LOG("[matching] deleted slot id=%d", slot.id);
+        return 0;
+    }
+
+    // Stop a matching slot (stop worker, but keep slot metadata so it can be restarted)
+    ADHOCPP_API int sceNetAdhocMatchingStop(int matchingId) {
+        if (!g_matching_inited.load()) return -1;
+        int idx = matchingId - 1;
+        if (idx < 0 || idx >= MAX_MATCHING) return -1;
+        MatchingSlot& slot = g_matching_slots[idx];
+        if (!slot.used) return -2;
+        if (!slot.running) return 0; // already stopped
+
+        slot.running = false;
+        if (slot.worker.joinable()) {
+            slot.worker.join();
+        }
+        LOG("[matching] stopped slot id=%d", slot.id);
+        return 0;
+    }
+
+    // Start a previously created and stopped matching slot (creates worker thread)
+    // If slot is not created or is already running, returns error or success respectively.
+    ADHOCPP_API int sceNetAdhocMatchingStart(int matchingId) {
+        if (!g_matching_inited.load()) return -1;
+        int idx = matchingId - 1;
+        if (idx < 0 || idx >= MAX_MATCHING) return -1;
+        MatchingSlot& slot = g_matching_slots[idx];
+        if (!slot.used) return -2;
+        if (slot.running) return 0; // already running
+
+        // spawn worker thread
+        slot.running = true;
+        slot.worker = std::thread(matching_worker_func, &slot);
+        LOG("[matching] started slot id=%d", slot.id);
+        return 0;
+    }
+#else // new
+    // matching.cpp — safe wrappers (improved versions)
+    // Ensure we include proper headers and that g_matching_slots[] and MAX_MATCHING are visible.
+
+    ADHOCPP_API int sceNetAdhocMatchingStop(int matchingId) {
+        if (!g_matching_inited.load()) return -1;
+        int idx = matchingId - 1;
+        if (idx < 0 || idx >= MAX_MATCHING) return -1;
+        MatchingSlot& slot = g_matching_slots[idx];
+        if (!slot.used) return -2;
+        if (!slot.running) return 0;
+        slot.running = false;
+        // join thread if joinable (avoid blocking if already joined)
+        if (slot.worker.joinable()) {
+            slot.worker.join();
+        }
+        LOG("[matching] stopped slot id=%d", slot.id);
+        return 0;
+    }
+
+    ADHOCPP_API int sceNetAdhocMatchingStart(int matchingId) {
+        if (!g_matching_inited.load()) return -1;
+        int idx = matchingId - 1;
+        if (idx < 0 || idx >= MAX_MATCHING) return -1;
+        MatchingSlot& slot = g_matching_slots[idx];
+        if (!slot.used) return -2;
+        if (slot.running) return 0;
+        slot.running = true;
+        slot.worker = std::thread(matching_worker_func, &slot);
+        LOG("[matching] started slot id=%d", slot.id);
+        return 0;
+    }
+
+    ADHOCPP_API int sceNetAdhocMatchingDelete(int matchingId) {
+        if (!g_matching_inited.load()) return -1;
+        int idx = matchingId - 1;
+        if (idx < 0 || idx >= MAX_MATCHING) return -1;
+        MatchingSlot& slot = g_matching_slots[idx];
+        if (!slot.used) return -2;
+
+        // If running, stop first
+        if (slot.running) {
+            slot.running = false;
+            if (slot.worker.joinable()) {
+                slot.worker.join();
+            }
+        }
+
+        // clean PDP
+        if (slot.pdp_socket_id > 0) {
+            NetAdhocPdp_Delete_Wrap(slot.pdp_socket_id);
+            slot.pdp_socket_id = -1;
+        }
+
+        // clear members
+        {
+            std::lock_guard<std::mutex> lk(slot.lock);
+            slot.members.clear();
+        }
+
+        slot.used = false;
+        slot.id = 0;
+        slot.match_flags = 0;
+        slot.match_name[0] = '\0';
+        LOG("[matching] deleted slot id=%d", matchingId);
+        return 0;
+    }
+#endif
+
 } // extern "C"
 

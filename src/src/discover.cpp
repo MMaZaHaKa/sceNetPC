@@ -57,7 +57,24 @@ static void pack_ip_to_mac(uint32_t ip_nbo, uint8_t dest[6]) {
 //    char nickname[32];
 //};
 
-// Send a discover ping to given ip_nbo / port
+//// Send a discover ping to given ip_nbo / port
+//static void discover_send_ping(int pdp_socket, uint32_t ip_nbo, uint16_t port, const char* mynick) {
+//    char payload[256];
+//    int plen = snprintf(payload, sizeof(payload), "DISCOVER_PING:%s", mynick ? mynick : "unknown");
+//    if (plen <= 0) return;
+//    int sendlen = plen + 1;
+//    char destMac[6];
+//    pack_ip_to_mac(ip_nbo, (uint8_t*)destMac);
+//    int res = NetAdhocPdp_Send_Wrap(pdp_socket, destMac, port, payload, &sendlen, 0);
+//    if (res >= 0) {
+//        LOG("[discover] sent ping to %s:%d (len=%d)", inet_ntoa(*(struct in_addr*)&ip_nbo), port, sendlen);
+//    }
+//    else {
+//        LOG("[discover] ping send failed to %s:%d res=%d", inet_ntoa(*(struct in_addr*)&ip_nbo), port, res);
+//    }
+//}
+
+// Send a discover ping to given ip_nbo / port, and also to broadcast for LAN discovery.
 static void discover_send_ping(int pdp_socket, uint32_t ip_nbo, uint16_t port, const char* mynick) {
     char payload[256];
     int plen = snprintf(payload, sizeof(payload), "DISCOVER_PING:%s", mynick ? mynick : "unknown");
@@ -65,6 +82,8 @@ static void discover_send_ping(int pdp_socket, uint32_t ip_nbo, uint16_t port, c
     int sendlen = plen + 1;
     char destMac[6];
     pack_ip_to_mac(ip_nbo, (uint8_t*)destMac);
+
+    // send to explicit target first
     int res = NetAdhocPdp_Send_Wrap(pdp_socket, destMac, port, payload, &sendlen, 0);
     if (res >= 0) {
         LOG("[discover] sent ping to %s:%d (len=%d)", inet_ntoa(*(struct in_addr*)&ip_nbo), port, sendlen);
@@ -72,7 +91,21 @@ static void discover_send_ping(int pdp_socket, uint32_t ip_nbo, uint16_t port, c
     else {
         LOG("[discover] ping send failed to %s:%d res=%d", inet_ntoa(*(struct in_addr*)&ip_nbo), port, res);
     }
+
+    // send to the general broadcast address 255.255.255.255
+    uint32_t bcast_ip = htonl(INADDR_BROADCAST); // 255.255.255.255
+    char bcastMac[6];
+    pack_ip_to_mac(bcast_ip, (uint8_t*)bcastMac);
+    int bsendlen = sendlen;
+    int bres = NetAdhocPdp_Send_Wrap(pdp_socket, bcastMac, port, payload, &bsendlen, 0);
+    if (bres >= 0) {
+        LOG("[discover] sent broadcast ping len=%d", bsendlen);
+    }
+    else {
+        LOG("[discover] broadcast ping failed res=%d", bres);
+    }
 }
+
 
 // Send discover response (reply to ping) - uses same pdp socket
 static void discover_send_resp(int pdp_socket, uint32_t ip_nbo, uint16_t port, const char* mynick) {

@@ -43,20 +43,6 @@ extern "C" {
         return sceNetAdhocMatchingCreate();
     }
 
-    // Start matching: currently a lightweight no-op (matching worker already created at create time).
-    ADHOCPP_API int sceNetAdhocMatchingStart(int matchingId) {
-        LOG("[lib_extras] sceNetAdhocMatchingStart id=%d (noop)", matchingId);
-        (void)matchingId;
-        return 0;
-    }
-
-    // Stop matching: no-op placeholder (matchingTerm will fully stop)
-    ADHOCPP_API int sceNetAdhocMatchingStop(int matchingId) {
-        LOG("[lib_extras] sceNetAdhocMatchingStop id=%d (noop)", matchingId);
-        (void)matchingId;
-        return 0;
-    }
-
     // Select a target (store into local map) so later calls can use it.
     // This does not perform network actions by itself.
     ADHOCPP_API int sceNetAdhocMatchingSelectTarget(int matchingId, const uint8_t mac[6]) {
@@ -78,18 +64,6 @@ extern "C" {
             LOG("[lib_extras] canceled target for matching %d", matchingId);
         }
         return 0;
-    }
-
-    // Delete a single matching slot - we don't have per-slot delete in matching.cpp, so signal Term if id==all.
-    // To avoid destroying everything unexpectedly, we'll implement delete as Term if matchingId==0 (special),
-    // otherwise attempt to stop slot by calling Term then recreating remaining slots is complex - so return not implemented for now.
-    ADHOCPP_API int sceNetAdhocMatchingDelete(int matchingId) {
-        if (matchingId == 0) {
-            sceNetAdhocMatchingTerm();
-            return 0;
-        }
-        LOG("[lib_extras] sceNetAdhocMatchingDelete id=%d -> not fully implemented (use Term)", matchingId);
-        return -1;
     }
 
     // Adhocctl scan -> start discover (best-effort)
@@ -138,11 +112,34 @@ extern "C" {
         return -1;
     }
 
-    // Get scan info: not implemented in full, return 0
+    // sceNetAdhocctlGetScanInfo:
+    //  out - pointer to an array of PeerInfoEmuLocal (see your header)
+    //  size - number of entries space available (in elements)
+    //  returns number of filled entries (>=0). On error returns negative.
     ADHOCPP_API int sceNetAdhocctlGetScanInfo(void* out, int size) {
-        (void)out; (void)size;
-        LOG("[lib_extras] sceNetAdhocctlGetScanInfo (stub)");
-        return 0;
+        if (!out || size <= 0) return -1;
+        // We will call the internal peer list wrapper to fill local array
+        // NetAdhoc_GetPeerList_Wrap expects SceNetAdhocctlPeerInfoEmu, which is binary-compatible
+        // with PeerInfoEmuLocal in your header (we used same layout earlier).
+        const int MAXQ = (size > MAX_PEERS) ? MAX_PEERS : size;
+        // Use the runtime wrapper to fetch peers
+        // NetAdhoc_GetPeerList_Wrap takes SceNetAdhocctlPeerInfoEmu*; we used same layout earlier.
+        int got = NetAdhoc_GetPeerList_Wrap(out, MAXQ);
+        if (got < 0) return -2;
+        // If the out buffer was larger than the returned count, zero the rest of nicknames to be safe
+        if (got < size) {
+            // zero remaining entries' nickname just in case
+            PeerInfoEmuLocal* arr = (PeerInfoEmuLocal*)out;
+            for (int i = got; i < size; ++i) {
+                arr[i].next = 0;
+                memset(arr[i].mac, 0, sizeof(arr[i].mac));
+                arr[i].ip_addr = 0;
+                arr[i].flags = 0;
+                arr[i].last_recv = 0;
+                arr[i].nickname[0] = '\0';
+            }
+        }
+        return got;
     }
 
 
