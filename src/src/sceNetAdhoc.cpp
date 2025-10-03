@@ -72,12 +72,9 @@ static void socket_cleanup() {
 #endif
 }
 
-// Utility: IP from MAC (loopback for PC sim)
-static uint32_t mac_to_ip(const SceNetEtherAddr mac) {
-    uint32_t ip = 0x7F000001; // 127.0.0.1
-    // Pack first 4 bytes of MAC into IP for sim
-    memcpy(&ip, mac, 4);
-    return htonl(ip);
+// Utility: Always use loopback for sim
+static uint32_t get_sim_ip() {
+    return htonl(INADDR_LOOPBACK);
 }
 
 // Utility: Random MAC
@@ -214,7 +211,8 @@ int sceNetAdhocPdpSend(int id, const SceNetEtherAddr dest_mac, uint16_t port, co
     (void)timeout_us; (void)nonblock;
     std::lock_guard<std::mutex> lk(pdp_lock);
     if (id < 0 || id >= (int)pdp_slots.size() || !pdp_slots[id].used || len <= 0) return -1;
-    uint32_t dest_ip = mac_to_ip(dest_mac);
+    // For sim, always use loopback
+    uint32_t dest_ip = get_sim_ip();
 
     struct sockaddr_in dest;
     memset(&dest, 0, sizeof(dest));
@@ -263,8 +261,8 @@ int sceNetAdhocPtpOpen(const SceNetEtherAddr src_mac, uint16_t src_port, const S
         if (!ptp_slots[i].used) {
             ptp_slots[i].used = true;
             ptp_slots[i].is_server = false;
-            ptp_slots[i].peer_ip = mac_to_ip(dest_mac);
-            ptp_slots[i].peer_port = dest_port;
+            ptp_slots[i].peer_ip = get_sim_ip();  // Use loopback
+            ptp_slots[i].peer_port = 12345;  // Fixed port for sim
             memcpy(ptp_slots[i].peer_mac, dest_mac, 6);
             // Create client socket
             ptp_slots[i].sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -286,7 +284,7 @@ int sceNetAdhocPtpConnect(int id, int timeout_us, int nonblock) {
     struct sockaddr_in dest;
     memset(&dest, 0, sizeof(dest));
     dest.sin_family = AF_INET;
-    dest.sin_addr.s_addr = ptp_slots[id].peer_ip;
+    dest.sin_addr.s_addr = ptp_slots[id].peer_ip;  // loopback
     dest.sin_port = htons(ptp_slots[id].peer_port);
 
     // Simple connect (no timeout sim for now)
@@ -312,7 +310,7 @@ int sceNetAdhocPtpListen(const SceNetEtherAddr src_mac, uint16_t src_port, int b
         if (!ptp_slots[i].used) {
             ptp_slots[i].used = true;
             ptp_slots[i].is_server = true;
-            ptp_slots[i].peer_port = src_port;
+            ptp_slots[i].peer_port = 12345;  // Fixed for sim
             // Create server socket
             ptp_slots[i].sock = socket(AF_INET, SOCK_STREAM, 0);
             if (ptp_slots[i].sock < 0) {
@@ -325,7 +323,7 @@ int sceNetAdhocPtpListen(const SceNetEtherAddr src_mac, uint16_t src_port, int b
             memset(&addr, 0, sizeof(addr));
             addr.sin_family = AF_INET;
             addr.sin_addr.s_addr = htonl(INADDR_ANY);
-            addr.sin_port = htons(src_port);
+            addr.sin_port = htons(ptp_slots[i].peer_port);
             if (bind(ptp_slots[i].sock, (struct sockaddr*)&addr, sizeof(addr)) < 0 ||
                 listen(ptp_slots[i].sock, queue) < 0) {
                 close(ptp_slots[i].sock);
@@ -436,10 +434,10 @@ int sceNetAdhocctlInit(int stacksize, int priority, void* product) {
                 SceNetAdhocctlPeerInfo p;
                 p.next = nullptr;
                 generate_random_mac(p.mac);
-                snprintf(p.nickname, sizeof(p.nickname), "Peer%d", (int)peer_list.size());
+                snprintf(p.nickname, sizeof(p.nickname), "Peer%d", static_cast<int>(peer_list.size()));
                 memset(p.unknown, 0, sizeof(p.unknown));
-                p.timestamp = (unsigned long)std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                p.timestamp = static_cast<unsigned long>(std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count());
                 peer_list.push_back(p);
             }
         }
@@ -506,7 +504,10 @@ int sceNetAdhocctlGetScanInfo(int* length, void* buf) {
     std::lock_guard<std::mutex> lk(peer_lock);
     size_t num = min(static_cast<size_t>(32), peer_list.size());  // Fixed: cast to avoid unknown-type
     *length = static_cast<int>(num * sizeof(SceNetAdhocctlScanInfo));
-    SceNetAdhocctlScanInfo* scans = static_cast<SceNetAdhocctlScanInfo*>(buf);
+    // Assume buf starts with num_results for List
+    SceNetAdhocctlScanInfoList* list = static_cast<SceNetAdhocctlScanInfoList*>(buf);
+    list->num_results = static_cast<int>(num);
+    SceNetAdhocctlScanInfo* scans = list->results;
     for (size_t i = 0; i < num; ++i) {
         scans[i].next = nullptr;
         scans[i].channel = 1 + static_cast<int>(i);

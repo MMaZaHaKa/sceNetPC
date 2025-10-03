@@ -45,8 +45,8 @@ int main() {
     std::this_thread::sleep_for(std::chrono::seconds(3)); // Let scan thread run
 
     // Get scan info (use buf for list)
-    int scan_len = 32 * sizeof(SceNetAdhocctlScanInfo);
-    char scan_buf[1024]; // Enough for 32
+    int scan_len = sizeof(SceNetAdhocctlScanInfoList);
+    char scan_buf[sizeof(SceNetAdhocctlScanInfoList)]; // Exact size
     if (sceNetAdhocctlGetScanInfo(&scan_len, scan_buf) == 0) {
         SceNetAdhocctlScanInfoList* list = reinterpret_cast<SceNetAdhocctlScanInfoList*>(scan_buf);
         printf("Scan Info: %d results\n", list->num_results);
